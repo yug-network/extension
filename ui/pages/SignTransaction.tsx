@@ -20,6 +20,7 @@ import SignTransactionInfoProvider, {
   SignLocationState,
 } from "../components/SignTransaction/SignTransactionInfoProvider"
 import { useSigningLedgerState } from "../components/SignTransaction/useSigningLedgerState"
+import logger from "@tallyho/tally-background/lib/logger"
 
 export { SignType } from "../components/SignTransaction/SignTransactionInfoProvider"
 
@@ -67,6 +68,10 @@ export default function SignTransaction({
   useEffect(() => {
     if (!isWaitingForKeyrings && isTransactionSigned && isTransactionSigning) {
       if (shouldBroadcastOnSign && typeof signedTransaction !== "undefined") {
+        logger.debug(
+          // eslint-disable-next-line react-hooks/rules-of-hooks
+          useBackgroundSelector((state) => state.transactionConstruction)
+        )
         dispatch(broadcastSignedTransaction(signedTransaction))
       }
 
@@ -75,6 +80,10 @@ export default function SignTransaction({
       if (typeof assetSymbol !== "undefined") {
         history.push("/singleAsset", { symbol: assetSymbol })
       } else {
+        logger.debug(
+          // eslint-disable-next-line react-hooks/rules-of-hooks
+          useBackgroundSelector((state) => state.transactionConstruction)
+        )
         history.goBack()
       }
     }
@@ -126,6 +135,10 @@ export default function SignTransaction({
           transaction: transactionDetails,
           method: signingMethod,
         })
+      )
+      logger.debug(
+        // eslint-disable-next-line react-hooks/rules-of-hooks
+        useBackgroundSelector((state) => state.transactionConstruction)
       )
       setIsTransactionSigning(true)
     }
