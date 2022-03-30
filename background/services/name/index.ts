@@ -8,41 +8,21 @@ import { ServiceCreatorFunction, ServiceLifecycleEvents } from "../types"
 import BaseService from "../base"
 import ChainService from "../chain"
 import logger from "../../lib/logger"
-import { AddressOnNetwork } from "../../accounts"
 import { SECOND } from "../../constants"
+import PreferenceService from "../preferences"
 
-export type NameResolverSystem = "ENS" | "UNS" | "local"
+import {
+  addressBookResolverFor,
+  ensAddressResolverFor,
+  knownContractResolverFor,
+  NameResolverFunction,
+  NameResolverSystem,
+  ResolvedAddressRecord,
+  ResolvedAvatarRecord,
+  ResolvedNameRecord,
+} from "./utils"
 
-type ResolvedAddressRecord = {
-  from: {
-    name: DomainName
-  }
-  resolved: {
-    addressNetwork: AddressOnNetwork
-  }
-  system: NameResolverSystem
-}
-
-type ResolvedNameRecord = {
-  from: {
-    addressNetwork: AddressOnNetwork
-  }
-  resolved: {
-    name: DomainName
-    expiresAt: UNIXTime
-  }
-  system: NameResolverSystem
-}
-
-type ResolvedAvatarRecord = {
-  from: {
-    addressNetwork: AddressOnNetwork
-  }
-  resolved: {
-    avatar: URL
-  }
-  system: NameResolverSystem
-}
+export { NameResolverSystem }
 
 type Events = ServiceLifecycleEvents & {
   resolvedAddress: ResolvedAddressRecord
@@ -102,6 +82,8 @@ export default class NameService extends BaseService<Events> {
 
   private cachedResolvedNames: Record<string, ResolvedNameRecord> = {}
 
+  private addressResolvers: NameResolverFunction[] = []
+
   /**
    * Create a new NameService. The service isn't initialized until
    * startService() is called and resolved.
@@ -112,13 +94,23 @@ export default class NameService extends BaseService<Events> {
   static create: ServiceCreatorFunction<
     Events,
     NameService,
-    [Promise<ChainService>]
-  > = async (chainService) => {
-    return new this(await chainService)
+    [Promise<ChainService>, Promise<PreferenceService>]
+  > = async (chainService, preferenceService) => {
+    return new this(await chainService, await preferenceService)
   }
 
-  private constructor(private chainService: ChainService) {
+  private constructor(
+    private chainService: ChainService,
+    private preferenceService: PreferenceService
+  ) {
     super({})
+
+    this.addressResolvers = [
+      ...this.addressResolvers,
+      ensAddressResolverFor(chainService),
+      addressBookResolverFor(preferenceService),
+      knownContractResolverFor(preferenceService),
+    ]
 
     chainService.emitter.on(
       "newAccountToTrack",
@@ -200,41 +192,29 @@ export default class NameService extends BaseService<Events> {
       }
     }
 
-    const provider = this.chainService.providers.ethereum
-    // TODO cache name resolution and TTL
-    const name = await provider.lookupAddress(address)
-    // TODO proper domain name validation ala RFC2181
-    if (
-      !name ||
-      !(
-        name.length <= 253 &&
-        name.match(
-          /^[a-zA-Z0-9][a-zA-Z0-9-]{1,62}\.([a-zA-Z0-9][a-zA-Z0-9-]{1,62}\.)*[a-zA-Z0-9][a-zA-Z0-9-]{1,62}/
-        )
+    const attemptedResolutions = await Promise.allSettled(
+      this.addressResolvers.map((resolver) => resolver({ address, network }))
+    )
+
+    const resolvedNameRecord = attemptedResolutions
+      .map((result) =>
+        result.status === "fulfilled" ? result.value : undefined
       )
-    ) {
+      .find((result) => result !== undefined)
+
+    if (resolvedNameRecord === undefined) {
       return undefined
     }
 
-    const nameRecord = {
-      from: { addressNetwork: { address, network } },
-      resolved: {
-        name,
-        // TODO Read this from the name service; for now, this avoids infinite
-        // TODO resolution loops.
-        expiresAt: Date.now() + 10 * SECOND,
-      },
-      system: "ENS",
-    } as const
-
     const existingName = this.cachedResolvedNames[address]?.resolved?.name
-    this.cachedResolvedNames[address] = nameRecord
+    this.cachedResolvedNames[address] = resolvedNameRecord
 
     // Only emit an event if the resolved name changed.
-    if (existingName !== name) {
-      this.emitter.emit("resolvedName", nameRecord)
+    if (existingName !== resolvedNameRecord.resolved.name) {
+      this.emitter.emit("resolvedName", resolvedNameRecord)
     }
-    return name
+
+    return resolvedNameRecord.resolved.name
   }
 
   async lookUpAvatar(

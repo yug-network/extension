@@ -5,6 +5,12 @@ import { ServiceLifecycleEvents, ServiceCreatorFunction } from "../types"
 import { Preferences, TokenListPreferences } from "./types"
 import { getOrCreateDB, PreferenceDatabase } from "./db"
 import BaseService from "../base"
+import { normalizeEVMAddress } from "../../lib/utils"
+
+export const BUILT_IN_CONTRACT_NAMES = {
+  [normalizeEVMAddress("0xDef1C0ded9bec7F1a1670819833240f027b25EfF")]:
+    "0x Router",
+}
 
 interface Events extends ServiceLifecycleEvents {
   preferencesChanges: Preferences
@@ -46,6 +52,23 @@ export default class PreferenceService extends BaseService<Events> {
     this.db.close()
 
     await super.internalStopService()
+  }
+
+  // TODO Implement this as something stored in the database and user-manageable.
+  // eslint-disable-next-line class-methods-use-this
+  async getKnownContractNames(): Promise<{
+    evm: { [normalizedContractAddress: string]: string }
+  }> {
+    return { evm: BUILT_IN_CONTRACT_NAMES }
+  }
+
+  // TODO Implement this as something stored in the database and user-manageable.
+  // TODO Track account names in the UI in the address book.
+  // eslint-disable-next-line class-methods-use-this
+  async getAddressBook(): Promise<{
+    evm: { [normalizedAddress: string]: string }
+  }> {
+    return { evm: {} }
   }
 
   async getCurrency(): Promise<FiatCurrency> {
